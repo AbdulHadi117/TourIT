@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
 import {
   Star, MapPin, ChevronRight, ChevronLeft,
   Bookmark, Share2, Calendar, Clock, Wallet,
@@ -7,12 +7,13 @@ import {
   Mountain, Waves, Navigation, Users,
 } from "lucide-react";
 import type { Page } from "./App";
+import { fetchMapLayers, type CityMapLayer, type CityPin } from "./travelData";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 type Tab = "attractions" | "historical" | "hotels" | "restaurants" | "adventure";
 
 // ── City Data ──────────────────────────────────────────────────────────────
-const CITY = {
+const CITY_FALLBACK = {
   name: "Skardu",
   province: "Gilgit-Baltistan",
   country: "Pakistan",
@@ -26,7 +27,7 @@ const CITY = {
   description: "Skardu is the capital of Gilgit-Baltistan and the launching pad for expeditions to K2, Broad Peak, and Gasherbrum. The town sits where the Indus and Shigar rivers converge, ringed by peaks of the Karakoram range — the most densely concentrated group of high mountains on Earth.",
 };
 
-const QUICK_FACTS = [
+const QUICK_FACTS_FALLBACK = [
   { icon: <Calendar size={17} strokeWidth={1.7} />, label: "Ideal Duration", value: "3 – 5 Days" },
   { icon: <Thermometer size={17} strokeWidth={1.7} />, label: "Best Season", value: "May – Oct" },
   { icon: <Wallet size={17} strokeWidth={1.7} />, label: "Daily Budget", value: "Medium" },
@@ -50,7 +51,7 @@ interface Card {
   pinId?: number;
 }
 
-const CARDS: Card[] = [
+const CARDS_FALLBACK: Card[] = [
   // Attractions
   { id: 1, tab: "attractions", name: "Satpara Lake", subtitle: "A sapphire reservoir cradled by arid mountains", image: "https://images.unsplash.com/photo-1677103036843-df9e5ad74eea?w=500&h=320&fit=crop&auto=format", rating: 4.9, reviews: 1840, views: 98400, tag: "Natural Lake", tagColor: "bg-teal-50 text-teal-700 border-teal-200", meta: "16 km from centre", pinId: 3 },
   { id: 2, tab: "attractions", name: "Upper Kachura Lake", subtitle: "Crystal waters set against snow-dusted peaks", image: "https://images.unsplash.com/photo-1562913346-61ae3ab9277e?w=500&h=320&fit=crop&auto=format", rating: 4.8, reviews: 1560, views: 87300, tag: "Scenic Spot", tagColor: "bg-sky-50 text-sky-700 border-sky-200", meta: "31 km from centre", pinId: 4 },
@@ -81,7 +82,7 @@ const CARDS: Card[] = [
 ];
 
 // ── Map ────────────────────────────────────────────────────────────────────
-const MAP_PINS = [
+const MAP_PINS_FALLBACK: CityPin[] = [
   { id: 1, label: "Kharpocho Fort", x: 238, y: 158, city: "Skardu" },
   { id: 2, label: "Skardu Bazaar", x: 290, y: 198, city: "Skardu" },
   { id: 3, label: "Satpara Lake", x: 376, y: 268, city: "Skardu" },
@@ -92,7 +93,7 @@ const MAP_PINS = [
   { id: 8, label: "Lower Kachura Lake", x: 118, y: 278, city: "Kachura" },
 ];
 
-const ITINERARIES = [
+const ITINERARIES_FALLBACK = [
   {
     id: 0,
     title: "1-Day Express Tour",
@@ -173,16 +174,19 @@ function StarRow({ rating, count, size = 13 }: { rating: number; count: number; 
 }
 
 // ── Interactive Map ────────────────────────────────────────────────────────
-function InteractiveMap({ activeItinerary, hoveredPin, onPinHover }: {
+function InteractiveMap({ activeItinerary, hoveredPin, onPinHover, activeLayers, pins, itineraries }: {
   activeItinerary: number;
   hoveredPin: number | null;
   onPinHover: (id: number | null) => void;
+  activeLayers: Set<string>;
+  pins: CityPin[];
+  itineraries: typeof ITINERARIES_FALLBACK;
 }) {
-  const itinerary = ITINERARIES[activeItinerary];
+  const itinerary = itineraries[activeItinerary];
   const activeStops = itinerary.stops;
 
   const routePoints = itinerary.stops
-    .map((id) => MAP_PINS.find((p) => p.id === id)!)
+    .map((id) => pins.find((p) => p.id === id)!)
     .filter(Boolean);
 
   const routePath = routePoints
@@ -336,11 +340,13 @@ function InteractiveMap({ activeItinerary, hoveredPin, onPinHover }: {
         })}
 
         {/* Pins */}
-        {MAP_PINS.map((pin) => {
+        {pins.map((pin) => {
           const isActive = activeStops.includes(pin.id);
           const isHovered = hoveredPin === pin.id;
           const stopIndex = itinerary.stops.indexOf(pin.id);
           const pinColor = isActive ? itinerary.routeColor : "#94A3B8";
+          const layerKey = pin.layer === "road" ? "roads" : pin.layer;
+          if (!activeLayers.has(layerKey)) return null;
           const scale = isHovered ? 1.2 : 1;
 
           return (
@@ -374,7 +380,7 @@ function InteractiveMap({ activeItinerary, hoveredPin, onPinHover }: {
 
         {/* Hover tooltip */}
         {hoveredPin && (() => {
-          const pin = MAP_PINS.find((p) => p.id === hoveredPin);
+          const pin = pins.find((p) => p.id === hoveredPin);
           if (!pin) return null;
           const isActive = activeStops.includes(pin.id);
           const tipX = Math.min(pin.x + 16, 580);
@@ -399,11 +405,32 @@ function InteractiveMap({ activeItinerary, hoveredPin, onPinHover }: {
 
 // ── Main Component ─────────────────────────────────────────────────────────
 export default function CityPage({ onNavigate }: { onNavigate: (p: Page) => void }) {
+  const [mapData, setMapData] = useState<{ layers: CityMapLayer[]; pins: CityPin[] } | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>("attractions");
   const [savedDestination, setSavedDestination] = useState(false);
   const [selectedItinerary, setSelectedItinerary] = useState(0);
   const [hoveredPin, setHoveredPin] = useState<number | null>(null);
   const [expandedStep, setExpandedStep] = useState<number | null>(null);
+  const [activeLayers, setActiveLayers] = useState<Set<string>>(new Set(["roads", "fuel"]));
+
+  useEffect(() => {
+    void fetchMapLayers("skardu").then((data) => {
+      setMapData(data);
+      setActiveLayers(new Set(data.layers.filter((layer) => layer.visibleByDefault).map((layer) => layer.id)));
+    });
+  }, []);
+
+  const CITY = CITY_FALLBACK;
+  const QUICK_FACTS = QUICK_FACTS_FALLBACK;
+  const CARDS = CARDS_FALLBACK;
+  const MAP_PINS = mapData?.pins ?? MAP_PINS_FALLBACK;
+  const ITINERARIES = ITINERARIES_FALLBACK;
+  const mapLayers = mapData?.layers ?? [
+    { id: "roads", label: "Roads", description: "Major access roads and scenic drives", visibleByDefault: true },
+    { id: "fuel", label: "Fuel", description: "Fuel and repair points" },
+    { id: "weather", label: "Weather", description: "Weather conditions and mountain forecasts" },
+    { id: "emergency", label: "Emergency", description: "Rescue, hospital, and police points" },
+  ];
 
   const visibleCards = useMemo(
     () => CARDS.filter((c) => c.tab === activeTab),
@@ -632,6 +659,28 @@ export default function CityPage({ onNavigate }: { onNavigate: (p: Page) => void
             </p>
           </div>
 
+          <div className="mb-4 flex flex-wrap gap-2">
+            {mapLayers.map((layer) => {
+              const enabled = activeLayers.has(layer.id);
+              return (
+                <button
+                  key={layer.id}
+                  onClick={() => {
+                    setActiveLayers((prev) => {
+                      const next = new Set(prev);
+                      next.has(layer.id) ? next.delete(layer.id) : next.add(layer.id);
+                      return next;
+                    });
+                  }}
+                  className={`rounded-full px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest transition-colors ${enabled ? "bg-[#0E8C88] text-white" : "bg-[#F0EDE6] text-[#6B7280] hover:bg-[#EBF7F6]"}`}
+                  title={layer.description}
+                >
+                  {layer.label}
+                </button>
+              );
+            })}
+          </div>
+
           <div className="grid grid-cols-1 lg:grid-cols-[40%_60%] gap-0 rounded-2xl overflow-hidden border border-[#DDD6C7] bg-white shadow-sm" style={{ minHeight: 520 }}>
 
             {/* Left — Itinerary list */}
@@ -774,6 +823,9 @@ export default function CityPage({ onNavigate }: { onNavigate: (p: Page) => void
                   activeItinerary={selectedItinerary}
                   hoveredPin={hoveredPin}
                   onPinHover={setHoveredPin}
+                  activeLayers={activeLayers}
+                  pins={MAP_PINS}
+                  itineraries={ITINERARIES}
                 />
               </div>
 

@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useEffect, useState, useCallback } from "react";
 import {
   MapPin, Calendar, Clock, Wallet, Users, ChevronDown, ChevronRight,
   ChevronLeft, Utensils, Building2, Bus, Compass, GripVertical,
@@ -8,6 +8,14 @@ import {
   Bookmark, Navigation,
 } from "lucide-react";
 import type { Page } from "./App";
+import {
+  estimateBudget,
+  fetchTripPlannerSeed,
+  generateItinerary,
+  loadSavedTrips,
+  saveTrip,
+  type SavedTrip,
+} from "./travelData";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 type BlockType = "attraction" | "restaurant" | "hotel" | "transit";
@@ -33,7 +41,7 @@ interface TripDay {
 }
 
 // ── Trip Data ──────────────────────────────────────────────────────────────
-const INITIAL_DAYS: TripDay[] = [
+const INITIAL_DAYS_FALLBACK: TripDay[] = [
   {
     id: "d1", label: "Day 1", date: "Sat, 28 Jun", city: "Lahore", cityCode: "LHE",
     blocks: [
@@ -250,7 +258,8 @@ function CalendarView({ days }: { days: TripDay[] }) {
 
 // ── Main Component ─────────────────────────────────────────────────────────
 export default function TripPlannerPage({ onNavigate }: { onNavigate: (p: Page) => void }) {
-  const [days, setDays] = useState<TripDay[]>(INITIAL_DAYS);
+  const [days, setDays] = useState<TripDay[]>(INITIAL_DAYS_FALLBACK);
+  const [savedTrips, setSavedTrips] = useState<SavedTrip[]>([]);
   const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set(["d1","d2","d3"]));
   const [activeDay, setActiveDay] = useState("d1");
   const [centerView, setCenterView] = useState<CenterView>("map");
@@ -260,6 +269,53 @@ export default function TripPlannerPage({ onNavigate }: { onNavigate: (p: Page) 
   const [dragItem, setDragItem] = useState<{dayId:string;blockId:string}|null>(null);
   const [dragOverId, setDragOverId] = useState<string|null>(null);
   const [tripSaved, setTripSaved] = useState(false);
+  const [destinationInput, setDestinationInput] = useState("Lahore");
+  const [tripLengthInput, setTripLengthInput] = useState(3);
+  const [budgetInput, setBudgetInput] = useState(BUDGET_TOTAL);
+
+  useEffect(() => {
+    void fetchTripPlannerSeed().then((seed) => {
+      const persistedTrips = seed.savedTrips.length > 0 ? seed.savedTrips : loadSavedTrips();
+      setSavedTrips(persistedTrips);
+
+      const restoredTrip = persistedTrips[0];
+      if (restoredTrip?.days?.length) {
+        setDays(restoredTrip.days);
+        setActiveDay(restoredTrip.days[0].id);
+        setDestinationInput(restoredTrip.destination);
+      } else {
+        setDays(INITIAL_DAYS_FALLBACK);
+      }
+    });
+  }, []);
+
+  const handleGenerateTrip = () => {
+    const generatedDays = generateItinerary({
+      destination: destinationInput.trim() || "Lahore",
+      days: tripLengthInput,
+      budgetPKR: budgetInput,
+      groupSize,
+    });
+    setDays(generatedDays);
+    setActiveDay(generatedDays[0]?.id ?? "d1");
+    setExpandedDays(new Set(generatedDays.map((day) => day.id)));
+    setTripSaved(false);
+  };
+
+  const handleSaveTrip = () => {
+    const budget = estimateBudget(days, groupSize);
+    const trip: SavedTrip = {
+      id: crypto.randomUUID(),
+      title: `${destinationInput || days[0]?.city || "Trip"} itinerary`,
+      destination: destinationInput || days[0]?.city || "Trip",
+      days,
+      budget,
+      createdAt: new Date().toISOString(),
+    };
+    saveTrip(trip);
+    setSavedTrips(loadSavedTrips());
+    setTripSaved(true);
+  };
 
   // Derived budget
   const allBlocks = days.flatMap(d => d.blocks);
@@ -335,11 +391,53 @@ export default function TripPlannerPage({ onNavigate }: { onNavigate: (p: Page) 
             <button className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-[#DDD6C7] bg-white text-xs font-semibold text-[#12233A] hover:border-[#12233A] transition-all">
               <Share2 size={13}/> Share
             </button>
-            <button onClick={() => setTripSaved(!tripSaved)} className={`flex items-center gap-1.5 px-4 py-2 rounded-xl border text-xs font-bold transition-all ${tripSaved ? "bg-[#0E8C88] border-[#0E8C88] text-white" : "bg-[#12233A] border-[#12233A] text-white hover:bg-[#1a3150]"}`}>
+            <button onClick={handleSaveTrip} className={`flex items-center gap-1.5 px-4 py-2 rounded-xl border text-xs font-bold transition-all ${tripSaved ? "bg-[#0E8C88] border-[#0E8C88] text-white" : "bg-[#12233A] border-[#12233A] text-white hover:bg-[#1a3150]"}`}>
               <CheckCircle size={13}/> {tripSaved ? "Saved" : "Save Trip"}
             </button>
           </div>
         </div>
+
+        <section className="grid grid-cols-1 lg:grid-cols-[1.1fr_0.9fr_0.9fr] gap-4 rounded-2xl border border-[#DDD6C7] bg-white p-5 shadow-sm">
+          <label className="space-y-2">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-[#6B7280]">Destination</span>
+            <input value={destinationInput} onChange={(event) => setDestinationInput(event.target.value)} className="w-full rounded-xl border border-[#DDD6C7] px-4 py-3 text-sm outline-none focus:border-[#0E8C88]" placeholder="Lahore, Skardu, Hunza" />
+          </label>
+          <label className="space-y-2">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-[#6B7280]">Days</span>
+            <input type="number" min={1} max={10} value={tripLengthInput} onChange={(event) => setTripLengthInput(Math.max(1, Math.min(10, Number(event.target.value) || 1)))} className="w-full rounded-xl border border-[#DDD6C7] px-4 py-3 text-sm outline-none focus:border-[#0E8C88]" />
+          </label>
+          <label className="space-y-2">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-[#6B7280]">Budget PKR</span>
+            <div className="flex items-center gap-2">
+              <input type="number" min={0} value={budgetInput} onChange={(event) => setBudgetInput(Number(event.target.value) || 0)} className="w-full rounded-xl border border-[#DDD6C7] px-4 py-3 text-sm outline-none focus:border-[#0E8C88]" />
+              <button onClick={handleGenerateTrip} className="rounded-xl bg-[#0E8C88] px-4 py-3 text-xs font-bold text-white transition-colors hover:bg-[#0B7874]">
+                Generate
+              </button>
+            </div>
+          </label>
+        </section>
+
+        <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {savedTrips.length > 0 ? savedTrips.map((trip) => (
+            <button
+              key={trip.id}
+              onClick={() => {
+                setDays(trip.days);
+                setActiveDay(trip.days[0]?.id ?? "d1");
+                setDestinationInput(trip.destination);
+              }}
+              className="rounded-2xl border border-[#DDD6C7] bg-white p-4 text-left shadow-sm transition-all hover:border-[#0E8C88] hover:shadow-md"
+            >
+              <p className="text-[10px] font-bold uppercase tracking-widest text-[#0E8C88]">Saved trip</p>
+              <p className="mt-2 text-sm font-bold text-[#12233A]">{trip.title}</p>
+              <p className="mt-1 text-xs text-[#6B7280]">{trip.destination} · {trip.days.length} days · PKR {trip.budget.total.toLocaleString()}</p>
+            </button>
+          )) : (
+            <div className="rounded-2xl border border-dashed border-[#DDD6C7] bg-white p-4 text-sm text-[#6B7280]">
+              Saved trips will appear here after you click Save Trip.
+            </div>
+          )}
+        </section>
 
         {/* ── THREE-PANEL LAYOUT ─────────────────────────────────────── */}
         <div className="grid grid-cols-[30%_1fr_25%] gap-0 rounded-2xl overflow-hidden border border-[#DDD6C7] shadow-md" style={{ minHeight: 680 }}>

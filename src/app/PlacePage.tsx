@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import {
   Star, MapPin, ChevronRight, ChevronLeft,
   Bookmark, Share2, Phone, Clock, Ticket,
@@ -9,9 +9,10 @@ import {
   Navigation2, ExternalLink, X,
 } from "lucide-react";
 import type { Page } from "./App";
+import { fetchPlaceDetail, type PlaceDetail } from "./travelData";
 
 // ── Place Data ─────────────────────────────────────────────────────────────
-const PLACE = {
+const PLACE_FALLBACK = {
   name: "Badshahi Mosque",
   subtitle: "Masjid-e-Badshahi",
   category: "Religious Heritage · Mughal Architecture",
@@ -30,14 +31,14 @@ const PLACE = {
   classification: "UNESCO Tentative List",
 };
 
-const HOURS = [
+const HOURS_FALLBACK = [
   { day: "Monday – Thursday", open: "06:00", close: "22:00", note: "" },
   { day: "Friday", open: "06:00", close: "22:00", note: "Non-worshippers: exit 11:30–14:00" },
   { day: "Saturday – Sunday", open: "06:00", close: "22:00", note: "Peak visitor hours" },
   { day: "Ramadan (all days)", open: "24 hrs", close: "", note: "Open continuously during holy month" },
 ];
 
-const TICKETS = [
+const TICKETS_FALLBACK = [
   { category: "Pakistani Nationals", price: "Free", note: "Valid CNIC required" },
   { category: "Foreign Tourists", price: "PKR 500", note: "≈ USD 1.80 · includes Museum entry" },
   { category: "Students (Intl.)", price: "PKR 200", note: "Valid student ID required" },
@@ -45,7 +46,7 @@ const TICKETS = [
   { category: "Guided Tour (1 hr)", price: "PKR 800", note: "English / Urdu · book at entrance" },
 ];
 
-const AMENITIES = [
+const AMENITIES_FALLBACK = [
   { icon: <Users size={15} />, label: "Guided Tours Available", verified: true },
   { icon: <Camera size={15} />, label: "Photography Permitted", verified: true },
   { icon: <Accessibility size={15} />, label: "Wheelchair Accessible (main court)", verified: true },
@@ -80,7 +81,7 @@ interface Review {
   verified: boolean;
 }
 
-const REVIEWS: Review[] = [
+const REVIEWS_FALLBACK: Review[] = [
   {
     id: 1,
     name: "Aisha Mahmood",
@@ -148,14 +149,14 @@ const REVIEWS: Review[] = [
 ];
 
 // ── Nearby Places ──────────────────────────────────────────────────────────
-const NEARBY_EAT = [
+const NEARBY_EAT_FALLBACK = [
   { id: 1, name: "Butt Karahi", type: "Restaurant", cuisine: "Lahori Karahi", distance: "0.3 km", rating: 4.8, image: "https://images.unsplash.com/photo-1779902431972-3433d66fd143?w=300&h=200&fit=crop&auto=format", price: "PKR 800–1,500" },
   { id: 2, name: "Waris Nihari", type: "Restaurant", cuisine: "Traditional Nihari", distance: "0.5 km", rating: 4.7, image: "https://images.unsplash.com/photo-1762922425202-2e65559c047f?w=300&h=200&fit=crop&auto=format", price: "PKR 400–900" },
   { id: 3, name: "Old City Café", type: "Café", cuisine: "Chai & Snacks", distance: "0.8 km", rating: 4.5, image: "https://images.unsplash.com/photo-1758887263037-9366a858f5ce?w=300&h=200&fit=crop&auto=format", price: "PKR 200–600" },
   { id: 4, name: "Lahori Tikka House", type: "Restaurant", cuisine: "Tikka & BBQ", distance: "1.1 km", rating: 4.6, image: "https://images.unsplash.com/photo-1712218275818-6bbb7e5a0a44?w=300&h=200&fit=crop&auto=format", price: "PKR 1,000–2,000" },
 ];
 
-const NEARBY_STAY = [
+const NEARBY_STAY_FALLBACK = [
   { id: 1, name: "Pearl Continental Lahore", type: "Luxury Hotel", distance: "2.1 km", rating: 4.7, image: "https://images.unsplash.com/photo-1629552266115-a8a3bbdebeed?w=300&h=200&fit=crop&auto=format", price: "From PKR 18,000/night" },
   { id: 2, name: "Walled City Heritage Inn", type: "Boutique Hotel", distance: "0.6 km", rating: 4.8, image: "https://images.unsplash.com/photo-1632899483117-7168ca4b0db8?w=300&h=200&fit=crop&auto=format", price: "From PKR 7,500/night" },
   { id: 3, name: "Avari Lahore", type: "4-Star Hotel", distance: "3.4 km", rating: 4.6, image: "https://images.unsplash.com/photo-1629552441775-f348a18a391c?w=300&h=200&fit=crop&auto=format", price: "From PKR 12,000/night" },
@@ -312,12 +313,25 @@ function ReviewCard({ review, expanded, onToggle }: { review: Review; expanded: 
 
 // ── Main Component ─────────────────────────────────────────────────────────
 export default function PlacePage({ onNavigate }: { onNavigate: (p: Page) => void }) {
+  const [placeData, setPlaceData] = useState<PlaceDetail | null>(null);
   const [saved, setSaved] = useState(false);
   const [addedToTrip, setAddedToTrip] = useState(false);
   const [showAllAmenities, setShowAllAmenities] = useState(false);
   const [sortBy, setSortBy] = useState("Most Helpful");
   const [sortOpen, setSortOpen] = useState(false);
   const [expandedReviews, setExpandedReviews] = useState<Set<number>>(new Set());
+
+  useEffect(() => {
+    void fetchPlaceDetail().then(setPlaceData);
+  }, []);
+
+  const PLACE = placeData?.place ?? PLACE_FALLBACK;
+  const HOURS = placeData?.hours ?? HOURS_FALLBACK;
+  const TICKETS = placeData?.tickets ?? TICKETS_FALLBACK;
+  const AMENITIES = placeData?.amenities ?? AMENITIES_FALLBACK;
+  const REVIEWS = placeData?.reviews ?? REVIEWS_FALLBACK;
+  const NEARBY_EAT = placeData?.nearbyEat ?? NEARBY_EAT_FALLBACK;
+  const NEARBY_STAY = placeData?.nearbyStay ?? NEARBY_STAY_FALLBACK;
   const [activeNearbyTab, setActiveNearbyTab] = useState<"eat" | "stay">("eat");
   const nearbyRef = useRef<HTMLDivElement>(null);
 
