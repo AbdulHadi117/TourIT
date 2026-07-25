@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Search,
   Star,
@@ -18,16 +18,26 @@ import {
   Users,
   Building2,
   MessageSquare,
+  LogOut,
 } from "lucide-react";
 import ExplorePage from "./ExplorePage";
 import CityPage from "./CityPage";
 import PlacePage from "./PlacePage";
 import TripPlannerPage from "./TripPlannerPage";
 import AboutPage from "./AboutPage";
+import AuthPage from "./AuthPage";
+import ProfilePage from "./ProfilePage";
+import {
+  clearStoredUserProfile,
+  loadStoredUserProfile,
+  saveStoredUserProfile,
+  type AuthMode,
+  type UserProfile,
+} from "./auth";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 export type Page =
-  "home" | "explore" | "city" | "place" | "planner" | "about";
+  "home" | "explore" | "city" | "place" | "planner" | "about" | "auth" | "profile";
 
 // ── Shared Nav Links ───────────────────────────────────────────────────────
 const NAV_LINKS: { label: string; page: Page | null }[] = [
@@ -41,10 +51,16 @@ const NAV_LINKS: { label: string; page: Page | null }[] = [
 // ── Shared Header ──────────────────────────────────────────────────────────
 function SiteHeader({
   currentPage,
+  currentUser,
   onNavigate,
+  onStartAuth,
+  onSignOut,
 }: {
   currentPage: Page;
+  currentUser: UserProfile | null;
   onNavigate: (p: Page) => void;
+  onStartAuth: (mode: AuthMode) => void;
+  onSignOut: () => void;
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   return (
@@ -103,21 +119,42 @@ function SiteHeader({
 
         {/* Auth + mobile */}
         <div className="flex items-center gap-4">
-          <div className="hidden sm:flex items-center gap-4">
-            <a
-              href="#"
-              className="text-sm font-medium text-[#12233A]/70 hover:text-[#12233A] transition-colors"
-            >
-              Sign In
-            </a>
-            <span className="text-[#12233A]/20">/</span>
-            <a
-              href="#"
-              className="text-sm font-semibold text-white bg-[#0E8C88] px-4 py-2 rounded-lg hover:bg-[#0B7874] transition-colors"
-            >
-              Register
-            </a>
-          </div>
+          {currentUser ? (
+            <div className="hidden sm:flex items-center gap-3">
+              <button
+                onClick={() => onNavigate("profile")}
+                className="flex items-center gap-2 rounded-full border border-[rgba(18,35,58,0.12)] bg-white px-3 py-2 text-sm font-semibold text-[#12233A] transition-colors hover:border-[#0E8C88]"
+              >
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#0E8C88] text-xs font-black text-white">
+                  {currentUser.avatarSeed}
+                </div>
+                <span className="max-w-[130px] truncate">{currentUser.fullName}</span>
+              </button>
+              <button
+                onClick={onSignOut}
+                className="inline-flex items-center gap-2 rounded-lg border border-[rgba(225,91,63,0.18)] bg-[#FBE7E1] px-4 py-2 text-sm font-semibold text-[#E15B3F] transition-colors hover:bg-[#f8d9d0]"
+              >
+                <LogOut size={14} />
+                Sign Out
+              </button>
+            </div>
+          ) : (
+            <div className="hidden sm:flex items-center gap-4">
+              <button
+                onClick={() => onStartAuth("signin")}
+                className="text-sm font-medium text-[#12233A]/70 hover:text-[#12233A] transition-colors"
+              >
+                Sign In
+              </button>
+              <span className="text-[#12233A]/20">/</span>
+              <button
+                onClick={() => onStartAuth("register")}
+                className="text-sm font-semibold text-white bg-[#0E8C88] px-4 py-2 rounded-lg hover:bg-[#0B7874] transition-colors"
+              >
+                Register
+              </button>
+            </div>
+          )}
           <button
             className="lg:hidden text-[#12233A] p-1"
             onClick={() => setMobileOpen(!mobileOpen)}
@@ -145,18 +182,49 @@ function SiteHeader({
             </button>
           ))}
           <div className="flex items-center gap-4 pt-2 border-t border-[rgba(18,35,58,0.1)] mt-1">
-            <a
-              href="#"
-              className="text-sm font-medium text-[#12233A]/70"
-            >
-              Sign In
-            </a>
-            <a
-              href="#"
-              className="text-sm font-semibold text-white bg-[#0E8C88] px-4 py-2 rounded-lg"
-            >
-              Register
-            </a>
+            {currentUser ? (
+              <>
+                <button
+                  onClick={() => {
+                    onNavigate("profile");
+                    setMobileOpen(false);
+                  }}
+                  className="text-sm font-semibold text-[#12233A]"
+                >
+                  {currentUser.fullName}
+                </button>
+                <button
+                  onClick={() => {
+                    onSignOut();
+                    setMobileOpen(false);
+                  }}
+                  className="text-sm font-semibold text-[#E15B3F]"
+                >
+                  Sign Out
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => {
+                    onStartAuth("signin");
+                    setMobileOpen(false);
+                  }}
+                  className="text-sm font-medium text-[#12233A]/70"
+                >
+                  Sign In
+                </button>
+                <button
+                  onClick={() => {
+                    onStartAuth("register");
+                    setMobileOpen(false);
+                  }}
+                  className="text-sm font-semibold text-white bg-[#0E8C88] px-4 py-2 rounded-lg"
+                >
+                  Register
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -884,10 +952,37 @@ function HomePage({
 // ── Root App ───────────────────────────────────────────────────────────────
 export default function App() {
   const [page, setPage] = useState<Page>("home");
+  const [authMode, setAuthMode] = useState<AuthMode>("signin");
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() =>
+    loadStoredUserProfile(),
+  );
+
+  useEffect(() => {
+    if (currentUser) {
+      saveStoredUserProfile(currentUser);
+    } else {
+      clearStoredUserProfile();
+    }
+  }, [currentUser]);
 
   const navigate = (p: Page) => {
     setPage(p);
     window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const startAuth = (mode: AuthMode) => {
+    setAuthMode(mode);
+    navigate("auth");
+  };
+
+  const handleAuthSuccess = (user: UserProfile) => {
+    setCurrentUser(user);
+  };
+
+  const handleSignOut = () => {
+    setCurrentUser(null);
+    clearStoredUserProfile();
+    navigate("home");
   };
 
   return (
@@ -895,7 +990,13 @@ export default function App() {
       className="min-h-screen bg-background text-foreground"
       style={{ fontFamily: "'Inter', sans-serif" }}
     >
-      <SiteHeader currentPage={page} onNavigate={navigate} />
+      <SiteHeader
+        currentPage={page}
+        currentUser={currentUser}
+        onNavigate={navigate}
+        onStartAuth={startAuth}
+        onSignOut={handleSignOut}
+      />
       {page === "home" && <HomePage onNavigate={navigate} />}
       {page === "explore" && (
         <ExplorePage onNavigate={navigate} />
@@ -906,6 +1007,30 @@ export default function App() {
         <TripPlannerPage onNavigate={navigate} />
       )}
       {page === "about" && <AboutPage onNavigate={navigate} />}
+      {page === "auth" && (
+        <AuthPage
+          mode={authMode}
+          onModeChange={setAuthMode}
+          onNavigate={navigate}
+          onAuthSuccess={handleAuthSuccess}
+        />
+      )}
+      {page === "profile" && currentUser && (
+        <ProfilePage
+          user={currentUser}
+          onNavigate={navigate}
+          onUpdateUser={handleAuthSuccess}
+          onSignOut={handleSignOut}
+        />
+      )}
+      {page === "profile" && !currentUser && (
+        <AuthPage
+          mode="signin"
+          onModeChange={setAuthMode}
+          onNavigate={navigate}
+          onAuthSuccess={handleAuthSuccess}
+        />
+      )}
     </div>
   );
 }
