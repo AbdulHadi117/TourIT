@@ -23,17 +23,18 @@ import ExplorePage from "./ExplorePage";
 import CityPage from "./CityPage";
 import PlacePage from "./PlacePage";
 import TripPlannerPage from "./TripPlannerPage";
+import AboutPage from "./AboutPage";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 export type Page =
-  "home" | "explore" | "city" | "place" | "planner";
+  "home" | "explore" | "city" | "place" | "planner" | "about";
 
 // ── Shared Nav Links ───────────────────────────────────────────────────────
 const NAV_LINKS: { label: string; page: Page | null }[] = [
   { label: "Home", page: "home" },
   { label: "Explore Destinations", page: "explore" },
   { label: "Trip Planner", page: "planner" },
-  { label: "About Us", page: null },
+  { label: "About Us", page: "about" },
   { label: "Contact", page: null },
 ];
 
@@ -904,6 +905,7 @@ export default function App() {
       {page === "planner" && (
         <TripPlannerPage onNavigate={navigate} />
       )}
+      {page === "about" && <AboutPage onNavigate={navigate} />}
     </div>
   );
 }
